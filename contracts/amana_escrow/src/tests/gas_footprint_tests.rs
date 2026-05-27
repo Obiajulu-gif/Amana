@@ -47,6 +47,21 @@ mod gas_footprint_tests {
     /// Maximum memory bytes allowed for resolve_dispute.
     const BASELINE_RESOLVE_MEM: u64 = 4_000_000;
 
+    fn combined_lifecycle_baseline() -> (u64, u64) {
+        let cpu = BASELINE_CREATE_TRADE_CPU
+            .checked_add(BASELINE_DEPOSIT_CPU)
+            .and_then(|v| v.checked_add(BASELINE_DISPUTE_CPU))
+            .and_then(|v| v.checked_add(BASELINE_RESOLVE_CPU))
+            .expect("combined CPU baseline overflowed");
+        let mem = BASELINE_CREATE_TRADE_MEM
+            .checked_add(BASELINE_DEPOSIT_MEM)
+            .and_then(|v| v.checked_add(BASELINE_DISPUTE_MEM))
+            .and_then(|v| v.checked_add(BASELINE_RESOLVE_MEM))
+            .expect("combined memory baseline overflowed");
+
+        (cpu, mem)
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
@@ -105,6 +120,28 @@ mod gas_footprint_tests {
     // #388-1  create_trade hot path
     // -----------------------------------------------------------------------
     #[test]
+    fn test_gas_baselines_are_documented_and_bounded() {
+        let baselines = [
+            ("create_trade", BASELINE_CREATE_TRADE_CPU, BASELINE_CREATE_TRADE_MEM),
+            ("deposit", BASELINE_DEPOSIT_CPU, BASELINE_DEPOSIT_MEM),
+            ("initiate_dispute", BASELINE_DISPUTE_CPU, BASELINE_DISPUTE_MEM),
+            ("resolve_dispute", BASELINE_RESOLVE_CPU, BASELINE_RESOLVE_MEM),
+        ];
+
+        for (name, cpu, mem) in baselines {
+            assert!(cpu > 0, "{name} CPU baseline must be documented");
+            assert!(mem > 0, "{name} memory baseline must be documented");
+        }
+
+        let (combined_cpu, combined_mem) = combined_lifecycle_baseline();
+        assert!(combined_cpu >= BASELINE_RESOLVE_CPU);
+        assert!(combined_mem >= BASELINE_RESOLVE_MEM);
+    }
+
+    // -----------------------------------------------------------------------
+    // #388-2  create_trade hot path
+    // -----------------------------------------------------------------------
+    #[test]
     fn test_gas_create_trade() {
         let ctx = Ctx::new(10_000);
         let client = ctx.client();
@@ -124,7 +161,7 @@ mod gas_footprint_tests {
     }
 
     // -----------------------------------------------------------------------
-    // #388-2  deposit hot path
+    // #388-3  deposit hot path
     // -----------------------------------------------------------------------
     #[test]
     fn test_gas_deposit() {
@@ -148,7 +185,7 @@ mod gas_footprint_tests {
     }
 
     // -----------------------------------------------------------------------
-    // #388-3  initiate_dispute hot path
+    // #388-4  initiate_dispute hot path
     // -----------------------------------------------------------------------
     #[test]
     fn test_gas_initiate_dispute() {
@@ -177,7 +214,7 @@ mod gas_footprint_tests {
     }
 
     // -----------------------------------------------------------------------
-    // #388-4  resolve_dispute hot path
+    // #388-5  resolve_dispute hot path
     // -----------------------------------------------------------------------
     #[test]
     fn test_gas_resolve_dispute() {
@@ -207,7 +244,7 @@ mod gas_footprint_tests {
     }
 
     // -----------------------------------------------------------------------
-    // #388-5  Regression guard: all four hot paths in sequence
+    // #388-6  Regression guard: all four hot paths in sequence
     //         Ensures no cumulative footprint surprise across a full lifecycle.
     // -----------------------------------------------------------------------
     #[test]
@@ -233,15 +270,8 @@ mod gas_footprint_tests {
             client.resolve_dispute(&trade_id, &ctx.mediator, &5_000_u32);
         });
 
-        // Combined threshold = sum of individual baselines
-        let combined_cpu = BASELINE_CREATE_TRADE_CPU
-            + BASELINE_DEPOSIT_CPU
-            + BASELINE_DISPUTE_CPU
-            + BASELINE_RESOLVE_CPU;
-        let combined_mem = BASELINE_CREATE_TRADE_MEM
-            + BASELINE_DEPOSIT_MEM
-            + BASELINE_DISPUTE_MEM
-            + BASELINE_RESOLVE_MEM;
+        // Combined threshold = checked sum of individual baselines.
+        let (combined_cpu, combined_mem) = combined_lifecycle_baseline();
 
         assert!(
             cpu <= combined_cpu,

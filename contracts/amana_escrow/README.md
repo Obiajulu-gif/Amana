@@ -53,3 +53,45 @@ Before production rollout, execute:
 ```bash
 cargo test
 ```
+
+## Gas estimation and footprint checks
+
+The contract includes gas and memory regression coverage in
+`src/tests/gas_footprint_tests.rs`. These tests measure the hot paths that are
+expected to dominate escrow lifecycle cost:
+
+- `create_trade`
+- `deposit`
+- `initiate_dispute`
+- `resolve_dispute`
+- full dispute lifecycle
+
+The versioned thresholds live beside the tests so the contract code, baseline,
+and assertion behavior change together. Treat any baseline update as a contract
+quality change: include the measured output, explain why the new cost is
+expected, and keep enough headroom for stable CI without masking real
+regressions.
+
+### Re-baseline process
+
+1. Run the contract suite from `contracts/amana_escrow`:
+
+   ```bash
+   cargo test gas_footprint_tests -- --nocapture
+   ```
+
+2. Compare measured CPU instructions and memory bytes against the constants in
+   `src/tests/gas_footprint_tests.rs`.
+3. If a deliberate contract change increases cost, update only the affected
+   constants and document the reason in the change description.
+4. Do not re-baseline for local machine noise, dependency drift without review,
+   or unrelated test instability.
+
+Assumptions:
+
+- Setup calls may use an unlimited budget so fixture construction does not
+  dominate the measurement.
+- Measured calls must use the same budget mode consistently across all hot
+  paths.
+- The combined lifecycle threshold is derived from the individual hot-path
+  thresholds and is checked for overflow in tests.

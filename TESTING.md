@@ -25,6 +25,7 @@ This document outlines testing approaches across frontend, backend, and smart co
 ### Contract
 - Function-level tests
 - Edge case coverage
+- Gas and memory regression checks for escrow lifecycle hot paths
 
 ---
 
@@ -57,6 +58,8 @@ This document outlines testing approaches across frontend, backend, and smart co
 ## CI/CD
 - Tests run via GitHub Actions
 - Command: `pnpm test` / `cargo test`
+- Contract gas baselines are documented in `contracts/amana_escrow/README.md`
+  and enforced by `contracts/amana_escrow/src/tests/gas_footprint_tests.rs`.
 
 ### Flaky tests (QA-001)
 
