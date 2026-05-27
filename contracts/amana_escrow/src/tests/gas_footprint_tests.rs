@@ -90,13 +90,21 @@ mod gas_footprint_tests {
             EscrowContractClient::new(&self.env, &self.contract_id)
         }
 
-        /// Reset the budget, run `f`, then return (cpu_insns, mem_bytes).
+        /// Reset the budget to the default bounded Soroban budget, run `f`,
+        /// then return (cpu_insns, mem_bytes).
+        ///
+        /// Setup calls use `reset_unlimited()` so they cannot fail while
+        /// building test fixtures. Measured calls must restore default limits
+        /// first; otherwise gas estimates can be recorded under an unrealistic
+        /// unlimited budget and hide regressions.
         fn measure<F: FnOnce()>(&self, f: F) -> (u64, u64) {
-            self.env.cost_estimate().budget().reset_unlimited();
+            self.env.cost_estimate().budget().reset_default();
             f();
             let budget = self.env.cost_estimate().budget();
             let cpu = budget.cpu_instruction_cost();
             let mem = budget.memory_bytes_cost();
+            assert!(cpu > 0, "gas measurement did not record CPU cost");
+            assert!(mem > 0, "gas measurement did not record memory cost");
             (cpu, mem)
         }
     }
