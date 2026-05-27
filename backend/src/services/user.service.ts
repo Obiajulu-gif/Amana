@@ -1,4 +1,4 @@
-import { getSupabaseClient } from "../lib/supabase";
+import { getSupabaseClient, runSupabaseQuery, SupabaseAdapterError } from "../lib/supabase";
 import { UpdateProfileInput, updateProfileSchema } from "../validators/user.validators";
 import { AppError, ErrorCode } from "../errors/errorCodes";
 import { StrKey } from "@stellar/stellar-sdk";
@@ -12,31 +12,28 @@ export async function findOrCreateUser(address: string) {
     throw new AppError(ErrorCode.VALIDATION_ERROR, 'Invalid Stellar public key', 400);
   }
 
-  const supabase = getSupabaseClient();
   const normalizedAddress = address.toLowerCase();
 
   try {
-    const { data, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("address", normalizedAddress)
-      .single();
+    const supabase = getSupabaseClient();
+    const { data, error } = await runSupabaseQuery(
+      supabase.from("users").select("*").eq("address", normalizedAddress).single(),
+      "find user by address",
+    );
 
     if (error && error.code === "PGRST116") {
       // Not found — auto-create
-      const { data: created, error: createError } = await supabase
-        .from("users")
-        .insert({ address: normalizedAddress })
-        .select()
-        .single();
+      const { data: created, error: createError } = await runSupabaseQuery(
+        supabase.from("users").insert({ address: normalizedAddress }).select().single(),
+        "create user",
+      );
 
       // Another request may have inserted the same address after our initial read.
       if (createError?.code === "23505") {
-        const { data: existing, error: existingError } = await supabase
-          .from("users")
-          .select("*")
-          .eq("address", normalizedAddress)
-          .single();
+        const { data: existing, error: existingError } = await runSupabaseQuery(
+          supabase.from("users").select("*").eq("address", normalizedAddress).single(),
+          "find user after unique constraint",
+        );
 
         if (!existingError && existing) {
           return existing;
@@ -56,6 +53,12 @@ export async function findOrCreateUser(address: string) {
     return data;
   } catch (error: any) {
     if (error.name === 'AppError') throw error;
+    if (error instanceof SupabaseAdapterError) {
+      throw new AppError(ErrorCode.INFRA_ERROR, 'User service dependency failure', 503, {
+        dependency: "supabase",
+        reason: error.code,
+      });
+    }
     throw new AppError(ErrorCode.INFRA_ERROR, 'User service dependency failure', 503);
   }
 }
@@ -74,20 +77,23 @@ export async function updateUser(address: string, input: UpdateProfileInput) {
     throw new AppError(ErrorCode.VALIDATION_ERROR, 'Invalid profile data', 400);
   }
 
-  const supabase = getSupabaseClient();
   const normalizedAddress = address.toLowerCase();
 
   try {
-    const { data, error } = await supabase
-      .from("users")
-      .update({ 
-        display_name: input.displayName,
-        avatar_url: input.avatarUrl,
-        updated_at: new Date().toISOString() 
-      })
-      .eq("address", normalizedAddress)
-      .select()
-      .single();
+    const supabase = getSupabaseClient();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from("users")
+        .update({
+          display_name: input.displayName,
+          avatar_url: input.avatarUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("address", normalizedAddress)
+        .select()
+        .single(),
+      "update user profile",
+    );
 
     if (error) {
       if (error.code === "PGRST116") {
@@ -99,6 +105,12 @@ export async function updateUser(address: string, input: UpdateProfileInput) {
     return data;
   } catch (error: any) {
     if (error.name === 'AppError') throw error;
+    if (error instanceof SupabaseAdapterError) {
+      throw new AppError(ErrorCode.INFRA_ERROR, 'User update failed', 503, {
+        dependency: "supabase",
+        reason: error.code,
+      });
+    }
     throw new AppError(ErrorCode.INFRA_ERROR, 'User update failed', 503);
   }
 }
@@ -111,15 +123,18 @@ export async function getPublicProfile(address: string) {
     throw new AppError(ErrorCode.VALIDATION_ERROR, 'Invalid Stellar public key', 400);
   }
 
-  const supabase = getSupabaseClient();
   const normalizedAddress = address.toLowerCase();
 
   try {
-    const { data, error } = await supabase
-      .from("users")
-      .select("address, display_name, avatar_url, created_at")
-      .eq("address", normalizedAddress)
-      .single();
+    const supabase = getSupabaseClient();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from("users")
+        .select("address, display_name, avatar_url, created_at")
+        .eq("address", normalizedAddress)
+        .single(),
+      "get public user profile",
+    );
 
     if (error) {
       if (error.code === "PGRST116") return null;
@@ -129,6 +144,12 @@ export async function getPublicProfile(address: string) {
     return data;
   } catch (error: any) {
     if (error.name === 'AppError') throw error;
+    if (error instanceof SupabaseAdapterError) {
+      throw new AppError(ErrorCode.INFRA_ERROR, 'User service dependency failure', 503, {
+        dependency: "supabase",
+        reason: error.code,
+      });
+    }
     throw new AppError(ErrorCode.INFRA_ERROR, 'User service dependency failure', 503);
   }
 }

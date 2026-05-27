@@ -1,4 +1,4 @@
-import { getSupabaseClient } from "../../lib/supabase";
+import { getSupabaseClient, runSupabaseQuery, SupabaseAdapterError } from "../../lib/supabase";
 import { findOrCreateUser, updateUser, getPublicProfile } from "../user.service";
 import { AppError, ErrorCode } from "../../errors/errorCodes";
 import { Keypair } from "@stellar/stellar-sdk";
@@ -8,6 +8,13 @@ const mockSafeParse = jest.fn();
 // Mock Supabase lib
 jest.mock("../../lib/supabase", () => ({
   getSupabaseClient: jest.fn(),
+  runSupabaseQuery: jest.fn((query: PromiseLike<any>) => Promise.resolve(query)),
+  SupabaseAdapterError: class SupabaseAdapterError extends Error {
+    constructor(public code: string, message: string) {
+      super(message);
+      this.name = "SupabaseAdapterError";
+    }
+  },
 }));
 
 jest.mock("../../validators/user.validators", () => ({
@@ -51,6 +58,9 @@ describe("UserService", () => {
     };
 
     (getSupabaseClient as jest.Mock).mockReturnValue(mockSupabase);
+    (runSupabaseQuery as jest.Mock).mockImplementation((query: PromiseLike<any>) =>
+      Promise.resolve(query),
+    );
   });
 
   describe("findOrCreateUser", () => {
@@ -176,6 +186,36 @@ describe("UserService", () => {
       await expect(findOrCreateUser(realWallet)).rejects.toMatchObject({
         code: ErrorCode.INFRA_ERROR,
         statusCode: 503,
+      });
+    });
+
+    it("translates Supabase adapter initialization failures to stable AppError semantics", async () => {
+      (getSupabaseClient as jest.Mock).mockImplementation(() => {
+        throw new SupabaseAdapterError("SUPABASE_MISCONFIGURED", "missing env");
+      });
+
+      await expect(findOrCreateUser(realWallet)).rejects.toMatchObject({
+        code: ErrorCode.INFRA_ERROR,
+        statusCode: 503,
+        details: {
+          dependency: "supabase",
+          reason: "SUPABASE_MISCONFIGURED",
+        },
+      });
+    });
+
+    it("translates Supabase query timeouts to stable AppError semantics", async () => {
+      (runSupabaseQuery as jest.Mock).mockRejectedValue(
+        new SupabaseAdapterError("SUPABASE_TIMEOUT", "timed out"),
+      );
+
+      await expect(findOrCreateUser(realWallet)).rejects.toMatchObject({
+        code: ErrorCode.INFRA_ERROR,
+        statusCode: 503,
+        details: {
+          dependency: "supabase",
+          reason: "SUPABASE_TIMEOUT",
+        },
       });
     });
   });
