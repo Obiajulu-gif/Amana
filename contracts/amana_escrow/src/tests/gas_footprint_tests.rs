@@ -18,10 +18,7 @@
 #[cfg(test)]
 mod gas_footprint_tests {
     use crate::{EscrowContract, EscrowContractClient};
-    use soroban_sdk::{
-        testutils::Address as _,
-        token, Address, Env, String,
-    };
+    use soroban_sdk::{Address, Env, String, testutils::Address as _, token};
 
     // -----------------------------------------------------------------------
     // Versioned baseline thresholds  (v0.1 — amana_escrow 0.1.0)
@@ -50,6 +47,35 @@ mod gas_footprint_tests {
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct GasSample {
+        cpu: u64,
+        mem: u64,
+    }
+
+    impl GasSample {
+        fn current(env: &Env) -> Self {
+            let budget = env.cost_estimate().budget();
+            Self {
+                cpu: budget.cpu_instruction_cost(),
+                mem: budget.memory_bytes_cost(),
+            }
+        }
+
+        fn delta_since(self, before: Self) -> Self {
+            Self {
+                cpu: self
+                    .cpu
+                    .checked_sub(before.cpu)
+                    .expect("CPU budget counter moved backwards"),
+                mem: self
+                    .mem
+                    .checked_sub(before.mem)
+                    .expect("memory budget counter moved backwards"),
+            }
+        }
+    }
 
     struct Ctx {
         env: Env,
@@ -83,21 +109,25 @@ mod gas_footprint_tests {
             client.initialize(&admin, &usdc_id, &treasury, &100_u32);
             client.set_mediator(&mediator);
 
-            Ctx { env, contract_id, buyer, seller, mediator }
+            Ctx {
+                env,
+                contract_id,
+                buyer,
+                seller,
+                mediator,
+            }
         }
 
         fn client(&self) -> EscrowContractClient<'_> {
             EscrowContractClient::new(&self.env, &self.contract_id)
         }
 
-        /// Reset the budget, run `f`, then return (cpu_insns, mem_bytes).
-        fn measure<F: FnOnce()>(&self, f: F) -> (u64, u64) {
+        /// Reset metering, run `f`, then return only the cost delta for `f`.
+        fn measure<F: FnOnce()>(&self, f: F) -> GasSample {
             self.env.cost_estimate().budget().reset_unlimited();
+            let before = GasSample::current(&self.env);
             f();
-            let budget = self.env.cost_estimate().budget();
-            let cpu = budget.cpu_instruction_cost();
-            let mem = budget.memory_bytes_cost();
-            (cpu, mem)
+            GasSample::current(&self.env).delta_since(before)
         }
     }
 
@@ -109,17 +139,19 @@ mod gas_footprint_tests {
         let ctx = Ctx::new(10_000);
         let client = ctx.client();
 
-        let (cpu, mem) = ctx.measure(|| {
+        let gas = ctx.measure(|| {
             client.create_trade(&ctx.buyer, &ctx.seller, &10_000_i128, &5000_u32, &5000_u32);
         });
 
         assert!(
-            cpu <= BASELINE_CREATE_TRADE_CPU,
-            "create_trade CPU regression: {cpu} > baseline {BASELINE_CREATE_TRADE_CPU}"
+            gas.cpu <= BASELINE_CREATE_TRADE_CPU,
+            "create_trade CPU regression: {} > baseline {BASELINE_CREATE_TRADE_CPU}",
+            gas.cpu
         );
         assert!(
-            mem <= BASELINE_CREATE_TRADE_MEM,
-            "create_trade MEM regression: {mem} > baseline {BASELINE_CREATE_TRADE_MEM}"
+            gas.mem <= BASELINE_CREATE_TRADE_MEM,
+            "create_trade MEM regression: {} > baseline {BASELINE_CREATE_TRADE_MEM}",
+            gas.mem
         );
     }
 
@@ -133,17 +165,19 @@ mod gas_footprint_tests {
         let trade_id =
             client.create_trade(&ctx.buyer, &ctx.seller, &10_000_i128, &5000_u32, &5000_u32);
 
-        let (cpu, mem) = ctx.measure(|| {
+        let gas = ctx.measure(|| {
             client.deposit(&trade_id);
         });
 
         assert!(
-            cpu <= BASELINE_DEPOSIT_CPU,
-            "deposit CPU regression: {cpu} > baseline {BASELINE_DEPOSIT_CPU}"
+            gas.cpu <= BASELINE_DEPOSIT_CPU,
+            "deposit CPU regression: {} > baseline {BASELINE_DEPOSIT_CPU}",
+            gas.cpu
         );
         assert!(
-            mem <= BASELINE_DEPOSIT_MEM,
-            "deposit MEM regression: {mem} > baseline {BASELINE_DEPOSIT_MEM}"
+            gas.mem <= BASELINE_DEPOSIT_MEM,
+            "deposit MEM regression: {} > baseline {BASELINE_DEPOSIT_MEM}",
+            gas.mem
         );
     }
 
@@ -158,7 +192,7 @@ mod gas_footprint_tests {
             client.create_trade(&ctx.buyer, &ctx.seller, &10_000_i128, &5000_u32, &5000_u32);
         client.deposit(&trade_id);
 
-        let (cpu, mem) = ctx.measure(|| {
+        let gas = ctx.measure(|| {
             client.initiate_dispute(
                 &trade_id,
                 &ctx.buyer,
@@ -167,12 +201,14 @@ mod gas_footprint_tests {
         });
 
         assert!(
-            cpu <= BASELINE_DISPUTE_CPU,
-            "initiate_dispute CPU regression: {cpu} > baseline {BASELINE_DISPUTE_CPU}"
+            gas.cpu <= BASELINE_DISPUTE_CPU,
+            "initiate_dispute CPU regression: {} > baseline {BASELINE_DISPUTE_CPU}",
+            gas.cpu
         );
         assert!(
-            mem <= BASELINE_DISPUTE_MEM,
-            "initiate_dispute MEM regression: {mem} > baseline {BASELINE_DISPUTE_MEM}"
+            gas.mem <= BASELINE_DISPUTE_MEM,
+            "initiate_dispute MEM regression: {} > baseline {BASELINE_DISPUTE_MEM}",
+            gas.mem
         );
     }
 
@@ -192,17 +228,19 @@ mod gas_footprint_tests {
             &String::from_str(&ctx.env, "QmGasTestReason"),
         );
 
-        let (cpu, mem) = ctx.measure(|| {
+        let gas = ctx.measure(|| {
             client.resolve_dispute(&trade_id, &ctx.mediator, &5_000_u32);
         });
 
         assert!(
-            cpu <= BASELINE_RESOLVE_CPU,
-            "resolve_dispute CPU regression: {cpu} > baseline {BASELINE_RESOLVE_CPU}"
+            gas.cpu <= BASELINE_RESOLVE_CPU,
+            "resolve_dispute CPU regression: {} > baseline {BASELINE_RESOLVE_CPU}",
+            gas.cpu
         );
         assert!(
-            mem <= BASELINE_RESOLVE_MEM,
-            "resolve_dispute MEM regression: {mem} > baseline {BASELINE_RESOLVE_MEM}"
+            gas.mem <= BASELINE_RESOLVE_MEM,
+            "resolve_dispute MEM regression: {} > baseline {BASELINE_RESOLVE_MEM}",
+            gas.mem
         );
     }
 
@@ -216,14 +254,9 @@ mod gas_footprint_tests {
         let client = ctx.client();
 
         // Measure the entire dispute lifecycle as one unit
-        let (cpu, mem) = ctx.measure(|| {
-            let trade_id = client.create_trade(
-                &ctx.buyer,
-                &ctx.seller,
-                &10_000_i128,
-                &5000_u32,
-                &5000_u32,
-            );
+        let gas = ctx.measure(|| {
+            let trade_id =
+                client.create_trade(&ctx.buyer, &ctx.seller, &10_000_i128, &5000_u32, &5000_u32);
             client.deposit(&trade_id);
             client.initiate_dispute(
                 &trade_id,
@@ -244,12 +277,42 @@ mod gas_footprint_tests {
             + BASELINE_RESOLVE_MEM;
 
         assert!(
-            cpu <= combined_cpu,
-            "combined lifecycle CPU regression: {cpu} > combined baseline {combined_cpu}"
+            gas.cpu <= combined_cpu,
+            "combined lifecycle CPU regression: {} > combined baseline {combined_cpu}",
+            gas.cpu
         );
         assert!(
-            mem <= combined_mem,
-            "combined lifecycle MEM regression: {mem} > combined baseline {combined_mem}"
+            gas.mem <= combined_mem,
+            "combined lifecycle MEM regression: {} > combined baseline {combined_mem}",
+            gas.mem
+        );
+    }
+
+    #[test]
+    fn test_gas_estimator_reports_operation_delta_only() {
+        let ctx = Ctx::new(10_000);
+        let client = ctx.client();
+
+        let trade_id =
+            client.create_trade(&ctx.buyer, &ctx.seller, &10_000_i128, &5000_u32, &5000_u32);
+
+        let idle = ctx.measure(|| {});
+        assert_eq!(
+            idle,
+            GasSample { cpu: 0, mem: 0 },
+            "idle estimator sample should not include setup or prior operation cost"
+        );
+
+        let deposit = ctx.measure(|| {
+            client.deposit(&trade_id);
+        });
+        assert!(
+            deposit.cpu > 0,
+            "deposit gas sample should include measured CPU cost"
+        );
+        assert!(
+            deposit.mem > 0,
+            "deposit gas sample should include measured memory cost"
         );
     }
 }
