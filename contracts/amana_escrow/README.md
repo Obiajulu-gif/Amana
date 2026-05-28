@@ -53,3 +53,60 @@ Before production rollout, execute:
 ```bash
 cargo test
 ```
+
+## Gas estimation and regression checks
+
+Gas regression coverage lives in `src/tests/gas_footprint_tests.rs`. The suite
+measures the main escrow hot paths:
+
+- `create_trade`
+- `deposit`
+- `initiate_dispute`
+- `resolve_dispute`
+- the combined dispute lifecycle
+
+The helper resets Soroban metering before each measured operation and records a
+CPU and memory delta for that operation only. Setup calls such as contract
+registration, token minting, initialization, and mediator registration are not
+part of the reported sample. This keeps the test focused on user-facing
+contract calls and avoids inflated estimates from fixture setup.
+
+Run the gas regression checks from the `contracts` workspace:
+
+```bash
+cargo test -p amana_escrow gas_footprint_tests -- --nocapture
+```
+
+Run the full contract validation suite before deployment or after changing
+shared contract behavior:
+
+```bash
+cargo test -p amana_escrow
+```
+
+### Baseline policy
+
+Baseline constants in `gas_footprint_tests.rs` are versioned with the contract
+tests and should only change when a contract change intentionally affects gas.
+When re-baselining:
+
+1. Run the gas test command on a clean checkout with the same Rust toolchain and
+   Soroban SDK version used by CI.
+2. Compare the new CPU and memory samples with the committed baselines.
+3. Increase thresholds only enough to account for the intentional behavior
+   change plus stable SDK variance.
+4. Commit the contract change, baseline update, and explanation together.
+
+Do not add network calls, live RPC dependencies, or time-sensitive assertions to
+gas tests. They must remain deterministic unit tests so CI failures point to a
+contract or SDK cost change rather than external infrastructure.
+
+### Estimation assumptions
+
+- Measurements use `Env::cost_estimate()` under Soroban test utilities.
+- The reported values are regression signals for CI, not production fee quotes.
+- Each measured sample must represent only the operation under test.
+- Idle samples should remain zero; a non-zero idle sample means setup or
+  bookkeeping has leaked into the estimate.
+- Operation samples should remain non-zero; a zero sample means the estimator is
+  no longer observing Soroban budget consumption.
