@@ -53,3 +53,21 @@ Before production rollout, execute:
 ```bash
 cargo test
 ```
+
+## Gas estimation and regression checks
+
+Gas regression tests live in `src/tests/gas_footprint_tests.rs`. The local
+estimator samples Soroban budget counters around each operation and records only
+the operation delta, so setup work and previous calls do not inflate a hot-path
+estimate.
+
+The baselines are intentionally conservative. Update them only with an
+intentional contract or Soroban SDK change, and include the observed test output
+in the related PR. To run the focused suite:
+
+```bash
+cargo test -p amana_escrow gas_footprint_tests -- --nocapture
+```
+
+RPC simulation remains the source of truth for production submission fees. These
+tests are CI guards for reproducible local regression detection.
